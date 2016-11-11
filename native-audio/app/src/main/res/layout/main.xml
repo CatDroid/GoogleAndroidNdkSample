@@ -160,13 +160,22 @@
     />
 <SeekBar
     android:id="@+id/volume_uri"
-    android:text="@string/volume_uri"    
+    android:text="@string/volume_uri"
+    android:layout_margin="5dp"
     android:layout_width="fill_parent"
     android:layout_height="wrap_content"
     />
 <SeekBar
     android:id="@+id/pan_uri"
-    android:text="@string/pan_uri"    
+    android:text="@string/pan_uri"
+    android:layout_margin="5dp"
+    android:layout_width="fill_parent"
+    android:layout_height="wrap_content"
+    />
+<SeekBar
+    android:id="@+id/playback_rate_uri"
+    android:text="@string/pan_uri"
+    android:layout_margin="5dp"
     android:layout_width="fill_parent"
     android:layout_height="wrap_content"
     />

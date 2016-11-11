@@ -26,7 +26,8 @@ import android.media.AudioManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
-import android.support.v4.app.ActivityCompat;
+//import android.support.v4.app.ActivityCompat;
+import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.AdapterView;
@@ -38,10 +39,10 @@ import android.widget.Spinner;
 import android.widget.Toast;
 
 public class NativeAudio extends Activity
-        implements ActivityCompat.OnRequestPermissionsResultCallback {
+        // implements ActivityCompat.OnRequestPermissionsResultCallback {
+{
 
-
-    //static final String TAG = "NativeAudio";
+    static final String TAG = "NativeAudio";
     private static final int AUDIO_ECHO_REQUEST = 0;
 
     static final int CLIP_NONE = 0;
@@ -65,6 +66,8 @@ public class NativeAudio extends Activity
         super.onCreate(icicle);
         setContentView(R.layout.main);
 
+        Log.d(TAG,"onCreate ----------- ");
+
         assetManager = getAssets();
 
         // initialize native audio system
@@ -84,19 +87,33 @@ public class NativeAudio extends Activity
             sampleRate = Integer.parseInt(nativeParam);
             nativeParam = myAudioMgr.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
             bufSize = Integer.parseInt(nativeParam);
+
+            // OUTPUT_SAMPLE_RATE = 48000 OUTPUT_FRAMES_PER_BUFFER = 192
+            Log.d(TAG,"OUTPUT_SAMPLE_RATE = " + sampleRate + " OUTPUT_FRAMES_PER_BUFFER = " + bufSize );
         }
+
+
         createBufferQueueAudioPlayer(sampleRate, bufSize);
 
         // initialize URI spinner
         Spinner uriSpinner = (Spinner) findViewById(R.id.uri_spinner);
         ArrayAdapter<CharSequence> uriAdapter = ArrayAdapter.createFromResource(
-                this, R.array.uri_spinner_array, android.R.layout.simple_spinner_item);
+                this,
+                R.array.local_uri_spinner_array,
+                /* R.array.uri_spinner_array, */
+                android.R.layout.simple_spinner_item);
         uriAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         uriSpinner.setAdapter(uriAdapter);
         uriSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
 
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
-                URI = parent.getItemAtPosition(pos).toString();
+                 URI = parent.getItemAtPosition(pos).toString();
+                /* 原来是 两个在线的音乐文件
+                  <string-array name="uri_spinner_array">
+                        <item>http://upload.wikimedia.org/wikipedia/commons/6/6d/Banana.ogg</item>
+                        <item>http://www.freesound.org/data/previews/18/18765_18799-lq.mp3</item>
+                  </string-array>
+                 */
             }
 
             public void onNothingSelected(AdapterView parent) {
@@ -138,11 +155,14 @@ public class NativeAudio extends Activity
             }
         });
 
+
+        //  使用AssertManager 播放APK中包含的mp3文件
+        //
         ((Button) findViewById(R.id.embedded_soundtrack)).setOnClickListener(new OnClickListener() {
             boolean created = false;
             public void onClick(View view) {
                 if (!created) {
-                    created = createAssetAudioPlayer(assetManager, "background.mp3");
+                    created = createAssetAudioPlayer(assetManager, "withus.mp3");
                 }
                 if (created) {
                     isPlayingAsset = !isPlayingAsset;
@@ -155,6 +175,7 @@ public class NativeAudio extends Activity
             boolean created = false;
             public void onClick(View view) {
                 if (!created && URI != null) {
+                    Log.d(TAG , " uri_soundtrack create URI Audio Player URI " + URI );
                     created = createUriAudioPlayer(URI);
                 }
              }
@@ -162,12 +183,14 @@ public class NativeAudio extends Activity
 
         ((Button) findViewById(R.id.pause_uri)).setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
+                Log.d(TAG , " setPlayingUriAudioPlayer  pause URI " );
                 setPlayingUriAudioPlayer(false);
              }
         });
 
         ((Button) findViewById(R.id.play_uri)).setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
+                Log.d(TAG , " setPlayingUriAudioPlayer  play URI " );
                 setPlayingUriAudioPlayer(true);
              }
         });
@@ -220,6 +243,7 @@ public class NativeAudio extends Activity
              }
         });
 
+        // 左右声道  相对大小
         ((Button) findViewById(R.id.enable_stereo_position_uri)).setOnClickListener(
                 new OnClickListener() {
             boolean enabled = false;
@@ -239,6 +263,8 @@ public class NativeAudio extends Activity
              }
         });
 
+
+        // 音量改变
         ((SeekBar) findViewById(R.id.volume_uri)).setOnSeekBarChangeListener(
                 new OnSeekBarChangeListener() {
             int lastProgress = 100;
@@ -252,7 +278,7 @@ public class NativeAudio extends Activity
             }
             public void onStopTrackingTouch(SeekBar seekBar) {
                 int attenuation = 100 - lastProgress;
-                int millibel = attenuation * -50;
+                int millibel = attenuation * -50; // 100 * -50  ~  0
                 setVolumeUriAudioPlayer(millibel);
             }
         });
@@ -269,22 +295,48 @@ public class NativeAudio extends Activity
             public void onStartTrackingTouch(SeekBar seekBar) {
             }
             public void onStopTrackingTouch(SeekBar seekBar) {
+                // 左右声道 相对大小
+                // 进度条在中间的时候 左右一样  进度条在<50 左边大声点 >50 右边大声点
                 int permille = (lastProgress - 50) * 20;
                 setStereoPositionUriAudioPlayer(permille);
             }
         });
 
+        ((SeekBar) findViewById(R.id.playback_rate_uri)).setOnSeekBarChangeListener(
+            new OnSeekBarChangeListener() {
+                int lastProgress = 100;
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (BuildConfig.DEBUG && !(progress >= 0 && progress <= 100)) {
+                        throw new AssertionError();
+                    }
+                    lastProgress = progress;
+                }
+                public void onStartTrackingTouch(SeekBar seekBar) {
+                }
+                public void onStopTrackingTouch(SeekBar seekBar) {
+
+                    /*
+                            0 ----- 50 ---- 100
+                          -1000 --- 0 ---- 1000
+                     */
+                    int permille = lastProgress * (1000 - -1000) / 100  + (-1000) ;
+                    setPlaybackRateUriAudioPlayer(permille);
+                }
+        });
+
+
+
         ((Button) findViewById(R.id.record)).setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
-                int status = ActivityCompat.checkSelfPermission(NativeAudio.this,
-                        Manifest.permission.RECORD_AUDIO);
-                if (status != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(
-                            NativeAudio.this,
-                            new String[]{Manifest.permission.RECORD_AUDIO},
-                            AUDIO_ECHO_REQUEST);
-                    return;
-                }
+//                int status = ActivityCompat.checkSelfPermission(NativeAudio.this,
+//                        Manifest.permission.RECORD_AUDIO);
+//                if (status != PackageManager.PERMISSION_GRANTED) {
+//                    ActivityCompat.requestPermissions(
+//                            NativeAudio.this,
+//                            new String[]{Manifest.permission.RECORD_AUDIO},
+//                            AUDIO_ECHO_REQUEST);
+//                    return;
+//                }
                 recordAudio();
             }
         });
@@ -329,37 +381,38 @@ public class NativeAudio extends Activity
         shutdown();
         super.onDestroy();
     }
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
-                                           @NonNull int[] grantResults) {
-        /*
-         * if any permission failed, the sample could not play
-         */
-        if (AUDIO_ECHO_REQUEST != requestCode) {
-            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-            return;
-        }
 
-        if (grantResults.length != 1  ||
-                grantResults[0] != PackageManager.PERMISSION_GRANTED) {
-            /*
-             * When user denied the permission, throw a Toast to prompt that RECORD_AUDIO
-             * is necessary; on UI, we display the current status as permission was denied so
-             * user know what is going on.
-             * This application go back to the original state: it behaves as if the button
-             * was not clicked. The assumption is that user will re-click the "start" button
-             * (to retry), or shutdown the app in normal way.
-             */
-            Toast.makeText(getApplicationContext(),
-                    getString(R.string.NeedRecordAudioPermission),
-                    Toast.LENGTH_SHORT)
-                    .show();
-            return;
-        }
-
-        // The callback runs on app's thread, so we are safe to resume the action
-        recordAudio();
-    }
+//    @Override
+//    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+//                                           @NonNull int[] grantResults) {
+//        /*
+//         * if any permission failed, the sample could not play
+//         */
+//        if (AUDIO_ECHO_REQUEST != requestCode) {
+//            super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+//            return;
+//        }
+//
+//        if (grantResults.length != 1  ||
+//                grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+//            /*
+//             * When user denied the permission, throw a Toast to prompt that RECORD_AUDIO
+//             * is necessary; on UI, we display the current status as permission was denied so
+//             * user know what is going on.
+//             * This application go back to the original state: it behaves as if the button
+//             * was not clicked. The assumption is that user will re-click the "start" button
+//             * (to retry), or shutdown the app in normal way.
+//             */
+//            Toast.makeText(getApplicationContext(),
+//                    getString(R.string.NeedRecordAudioPermission),
+//                    Toast.LENGTH_SHORT)
+//                    .show();
+//            return;
+//        }
+//
+//        // The callback runs on app's thread, so we are safe to resume the action
+//        recordAudio();
+//    }
 
     /** Native methods, implemented in jni folder */
     public static native void createEngine();
@@ -373,10 +426,11 @@ public class NativeAudio extends Activity
     public static native void setChannelMuteUriAudioPlayer(int chan, boolean mute);
     public static native void setChannelSoloUriAudioPlayer(int chan, boolean solo);
     public static native int getNumChannelsUriAudioPlayer();
-    public static native void setVolumeUriAudioPlayer(int millibel);
+    public static native void setVolumeUriAudioPlayer(int millibel); // mB
     public static native void setMuteUriAudioPlayer(boolean mute);
     public static native void enableStereoPositionUriAudioPlayer(boolean enable);
     public static native void setStereoPositionUriAudioPlayer(int permille);
+    public static native void setPlaybackRateUriAudioPlayer(int permille); // 千分之？
     public static native boolean selectClip(int which, int count);
     public static native boolean enableReverb(boolean enabled);
     public static native boolean createAudioRecorder();

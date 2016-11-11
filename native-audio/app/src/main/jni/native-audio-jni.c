@@ -28,7 +28,7 @@
 
 
 // for __android_log_print(ANDROID_LOG_INFO, "YourApp", "formatted message");
-// #include <android/log.h>
+#include <android/log.h>
 
 // for native audio
 #include <SLES/OpenSLES.h>
@@ -47,6 +47,12 @@ static const char hello[] =
 static const char android[] =
 #include "android_clip.h"
 ;
+
+
+#define LOG_TAG "native_audio_jni"
+#define ALOG(priority, tag, fmt...) __android_log_print(ANDROID_##priority, tag, fmt)
+#define ALOGD(...) ((void)ALOG(LOG_DEBUG, LOG_TAG, __VA_ARGS__))
+#define ALOGE(...) ((void)ALOG(LOG_ERROR, LOG_TAG, __VA_ARGS__))
 
 // engine interfaces
 static SLObjectItf engineObject = NULL;
@@ -78,6 +84,13 @@ static pthread_mutex_t  audioEngineLock = PTHREAD_MUTEX_INITIALIZER;
 static const SLEnvironmentalReverbSettings reverbSettings =
     SL_I3DL2_ENVIRONMENT_PRESET_STONECORRIDOR;
 
+// 改变播放的采样率 单位是千分几
+// 千分之一千 就是 正常 1x前进播放
+// 低于-1000 就是 缓慢播放
+// 高于 1000 就是 快速播放
+// == 0 相当于暂停
+static SLPlaybackRateItf fdlaybackRateItf = NULL;
+
 // URI player interfaces
 static SLObjectItf uriPlayerObject = NULL;
 static SLPlayItf uriPlayerPlay;
@@ -91,6 +104,7 @@ static SLPlayItf fdPlayerPlay;
 static SLSeekItf fdPlayerSeek;
 static SLMuteSoloItf fdPlayerMuteSolo;
 static SLVolumeItf fdPlayerVolume;
+
 
 // recorder interfaces
 static SLObjectItf recorderObject = NULL;
@@ -230,6 +244,128 @@ void bqRecorderCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
     pthread_mutex_unlock(&audioEngineLock);
 }
 
+/*
+     *  EnvironmentalReverb和PresetReverb
+     *  其中推荐
+     *  在游戏场景中应用EnvironmentalReverb         android.media.audiofx.EnvironmentalReverb
+     *  在音乐场景中应用PresetReverb                android.media.audiofx.PresetReverb
+     *
+     *  为了在通过AudioTrack、MediaPlayer进行音频播放时具有混响特效，在构建混响实例时指明音频流的会话ID即可
+     *
+     *  如果指定的会话ID为0，则混响作用于主要的音频输出混音器（mix）上
+     *  混响将会话ID指定为0需要"android.permission.MODIFY_AUDIO_SETTINGS"权限
+     *
+     *
+     *  混响引擎: 预置混响 和 环境混响
+     *
+     *  限制:
+     *
+     *  1. 不能在同一个OutputMix上 同时创建 两种混响
+     *  2. 平台可能忽视效果 如果平台认为会增加CPU负荷
+     *  3. Environmental reverb 不支持 SLEnvironmentalReverbSettings结构体的reflectionsDelay, reflectionsLevel, or reverbDelay等属性
+     *  4. MIME data format只能用于audio player或者 URI data locator 不能用在 audio recorder
+     *  5. 要求初始化mimeType为NULL 或者 utf-8字符串  也必须初始化containerType为一个有效值
+     *      考虑其他因素，比如可移植性到其他实现或者APP不能识别内容格式  我们建议使用  mimeType = NULL 和 containerType = SL_CONTAINERTYPE_UNSPECIFIED
+     *  6. 目前支持 wav@pcm wav@alaw wav@ulaw
+     *              mp3 ogg
+     *              AAC-LC HE-AACv1(AAC+) HE-AACv2(enhanded AAC+)
+     *              AMR
+     *              FLAC
+     *   7. AAC格式必须存在 MP4 or ADTS 容器中
+     *   8. 不支持 MIDI WMA
+     *   9. 不支持直接播放 DRM 或者 encrypted content. 需要应用自己解密或者执行任何DRM的限制
+     *   10. 不支持如下操作Object的方法:
+     *          Resume()
+     *          RegisterCallback()
+     *          AbortAsyncOperation()
+     *          SetPriority()
+     *          GetPriority()
+     *          SetLossOfControlInterfaces()
+     *
+     *      PCM data format:
+     *          PCM是唯一一种格式 可以使用  buffer queues , 支持如下配置:
+     *          1. 8-bit unsigned / 16-bit signed.
+     *          2. Mono / stereo.
+     *          3. 小端字节序
+     *          4. 采样率 8,000   11,025  12,000  16,000  22,050  24,000 32,000 44,100  48,000
+     *
+     *          录音的配置 一般是 设备依赖的  通常是 16,000 Hz mono/16-bit signed
+     *
+     *          samplesPerSec域的单位是 mHz  为了避免错误 我们建议使用宏定义 SL_SAMPLINGRATE_44_1
+     *
+     *          Android5.0 API21和以上 支持 单精度 浮点数  single-precision, floating-point format.
+     *          代码见 : https://developer.android.com/ndk/guides/audio/android-extensions.html#floating-point
+     *
+     *      Playback rate:
+     *          播放速率 指示 对象表现数据的速率  千分几
+     *          千分之1000 表示 正常播放
+     *          支持的播放速率 和 是否支持 是依赖平台实现
+     *          支持那些功能 或者 速率范围 可以通过 PlaybackRate::GetRateRange() or PlaybackRate::GetCapabilitiesOfRate()
+     *
+     *     Record:
+     *          不这次hi  SL_RECORDEVENT_HEADATLIMIT or SL_RECORDEVENT_HEADMOVING 等事件
+     *
+     *      Seek:
+     *          SetLoop()支持全部文件重复
+     *          要启动loop 可以 设置startPos参数为startPos和endPos参数为SL_TIME_UNKNOWN
+     *          (*uriPlayerSeek)->SetLoop(uriPlayerSeek, (SLboolean) isLooping, 0, SL_TIME_UNKNOWN);
+     *
+     *      Buffer queue data locator:
+     *          如果录音或者播放 要使用buffer queue 只支持PCM格式
+     *
+     *      四种数据加载器
+     *          1. Buffer queue data locator    内存队列   数据加载器
+     *          2. I/O device data locator      I/O设备   数据加载器
+     *          3. URI data locator             URI      数据加载器
+     *          4. Android file descriptor data locator Android文件描述符 数据加载器
+     *
+     *      I/O device data locator
+     *          1. 只能用于 Engine::CreateAudioRecorder的数据源
+     *          2. 使用如下代码:
+     *          SLDataLocator_IODevice loc_dev =  {
+     *                      SL_DATALOCATOR_IODEVICE,
+     *                      SL_IODEVICE_AUDIOINPUT,
+     *                      SL_DEFAULTDEVICEID_AUDIOINPUT,
+     *                      NULL};
+     *      URI data locator
+     *          1. 只能用于audio player 不能用于 audio recorder
+     *          2. 而且需要带 MIME data format
+     *          3. URI的schemes只支持 http: and file: 不支持 https:, ftp:, or content:  rtsp:
+     *
+     *      Android file descriptor data locator
+     *          1. 以读方式打开的文件描述符
+     *          2. 可以结合 native asset manager  因为asset manager可以返回asset资源的文件描述符
+     *
+     *      Data structures
+     *          Android 支持 OpenSL ES 1.0.1 数据结构
+     *
+     *          SLInterfaceID
+     *          SLEngineOption
+     *          SLEnvironmentalReverbSettings
+     *          SLDataFormat_MIME   SLDataFormat_PCM
+     *          SLDataLocator_BufferQueue   SLDataLocator_IODevice  SLDataLocator_URI
+     *          SLDataLocator_OutputMix
+     *          SLDataSink      SLDataSource
+     *
+     *      Platform configuration
+     *          支持多线程和线程安全
+     *          支持每个进程 一个 引擎
+     *          一个引擎 支持 32个object对象(设备内存和CPU可能会限制这个数目)
+     *
+     *          OpenMAX AL and OpenSL ES 可以用在一个应用中 都创建 都使用 都释放destroy
+     *          这种情况中 在内部共享同一个引擎, 32个object对象限制包含了OpenMAX AL and OpenSL ES
+     *          引擎维护一个引用计数 所以能够正确地destroy 和第二次destroy
+     *
+     *      Programming Notes
+     *          辅助编程参考 : OpenSL ES Programming Notes
+     *          OpenSL ES 1.0.1 specification: OpenSL_ES_Specification_1.0.1.pdf
+     *
+     *      Platform Issues
+     *          已发现问题  known issues
+     *          Dynamic interface management
+     *          不支持 DynamicInterfaceManagement::AddInterface
+     *          相反 在数组中定义接口ID 传递给 Create()
+*/
 
 // create the engine and output mix objects
 void Java_com_example_nativeaudio_NativeAudio_createEngine(JNIEnv* env, jclass clazz)
@@ -237,9 +373,40 @@ void Java_com_example_nativeaudio_NativeAudio_createEngine(JNIEnv* env, jclass c
     SLresult result;
 
     // create engine
+    ALOGD( "创建引擎Engine Object");
     result = slCreateEngine(&engineObject, 0, NULL, 0, NULL, NULL);
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
+    /*
+     *
+     * SLresult SLAPIENTRY slCreateEngine(
+                                SLObjectItf *pEngine,
+                                SLuint32 numOptions
+                                const SLEngineOption *pEngineOptions,
+                                SLuint32 numInterfaces,
+                                const SLInterfaceID *pInterfaceIds,
+                                const SLboolean * pInterfaceRequired
+                                )
+     * */
+
+    SLuint32 num = 0 ;
+    result = slQueryNumSupportedEngineInterfaces(&num);
+    if( result != SL_RESULT_SUCCESS){
+        ALOGE("slQueryNumSupportedEngineInterfaces fail ");
+    }else{
+        ALOGD("OpenSL 引擎对象支持的接口 包含必须的 和 可选的 num = %d", num );
+    }
+
+    for( SLuint32 i = 0 ; i < num ; i ++){
+        SLInterfaceID local_InterfaceID ;
+        result = slQuerySupportedEngineInterfaces(i,&local_InterfaceID);
+        ALOGD("supported Engine Interface  timestamp = %08x %04x %04x ; clock_seq = %04x ; node = %08x  " ,
+              local_InterfaceID->time_low ,
+              local_InterfaceID->time_mid ,
+              local_InterfaceID->time_hi_and_version ,
+              local_InterfaceID->clock_seq ,
+              local_InterfaceID->node[0]  );
+    }
 
     // realize the engine
     result = (*engineObject)->Realize(engineObject, SL_BOOLEAN_FALSE);
@@ -247,9 +414,11 @@ void Java_com_example_nativeaudio_NativeAudio_createEngine(JNIEnv* env, jclass c
     (void)result;
 
     // get the engine interface, which is needed in order to create other objects
+    ALOGD( "SLObjectItf --> SLEngineItf: 获取引擎对象Engine Object的接口  后面其他Object都要用引擎对象的接口(而非引擎对象本身)来创建");
     result = (*engineObject)->GetInterface(engineObject, SL_IID_ENGINE, &engineEngine);
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
+
 
     // create output mix, with environmental reverb specified as a non-required interface
     const SLInterfaceID ids[1] = {SL_IID_ENVIRONMENTALREVERB};
@@ -257,11 +426,14 @@ void Java_com_example_nativeaudio_NativeAudio_createEngine(JNIEnv* env, jclass c
     result = (*engineEngine)->CreateOutputMix(engineEngine, &outputMixObject, 1, ids, req);
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
+    ALOGD("通过 引擎对象的接口  创建  输出混音对象 不需要 环境混音接口 ");
+
 
     // realize the output mix
     result = (*outputMixObject)->Realize(outputMixObject, SL_BOOLEAN_FALSE);
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
+
 
     // get the environmental reverb interface
     // this could fail if the environmental reverb effect is not available,
@@ -274,6 +446,7 @@ void Java_com_example_nativeaudio_NativeAudio_createEngine(JNIEnv* env, jclass c
                 outputMixEnvironmentalReverb, &reverbSettings);
         (void)result;
     }
+    ALOGD("获得 输出(环境)混音对象 的 效果接口 (可能没有实现)");
     // ignore unsuccessful result codes for environmental reverb, as it is optional for this example
 
 }
@@ -342,6 +515,7 @@ void Java_com_example_nativeaudio_NativeAudio_createBufferQueueAudioPlayer(JNIEn
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
 
+    // 注册函数 让系统回调填充buffer
     // register callback on the buffer queue
     result = (*bqPlayerBufferQueue)->RegisterCallback(bqPlayerBufferQueue, bqPlayerCallback, NULL);
     assert(SL_RESULT_SUCCESS == result);
@@ -357,7 +531,7 @@ void Java_com_example_nativeaudio_NativeAudio_createBufferQueueAudioPlayer(JNIEn
     }
 
 #if 0   // mute/solo is not supported for sources that are known to be mono, as this is
-    // get the mute/solo interface
+    // get the mute/solo interface  获得 静音/单声道 接口
     result = (*bqPlayerObject)->GetInterface(bqPlayerObject, SL_IID_MUTESOLO, &bqPlayerMuteSolo);
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
@@ -385,10 +559,19 @@ jboolean Java_com_example_nativeaudio_NativeAudio_createUriAudioPlayer(JNIEnv* e
     const char *utf8 = (*env)->GetStringUTFChars(env, uri, NULL);
     assert(NULL != utf8);
 
+    ALOGD("create Uri AudioPlayer %s" , utf8 );
+
     // configure audio source
     // (requires the INTERNET permission depending on the uri parameter)
-    SLDataLocator_URI loc_uri = {SL_DATALOCATOR_URI, (SLchar *) utf8};
-    SLDataFormat_MIME format_mime = {SL_DATAFORMAT_MIME, NULL, SL_CONTAINERTYPE_UNSPECIFIED};
+    SLDataLocator_URI loc_uri = {SL_DATALOCATOR_URI, (SLchar *) utf8}; // 路径 data locator
+    /*
+     * typedef struct SLDataFormat_MIME_ {
+            SLuint32 		formatType;     format type可以是 SL_DATAFORMAT_MIME 或者 SL_DATAFORMAT_PCM
+            SLchar * 		mimeType;
+            SLuint32		containerType;  container Type 容器类型可以是 raw ogg mp3 mp4 3gpp wav等
+        } SLDataFormat_MIME;
+     */
+    SLDataFormat_MIME format_mime = {SL_DATAFORMAT_MIME, NULL, SL_CONTAINERTYPE_UNSPECIFIED}; // container type unspecified 容器类型不确定
     SLDataSource audioSrc = {&loc_uri, &format_mime};
 
     // configure audio sink
@@ -400,6 +583,11 @@ jboolean Java_com_example_nativeaudio_NativeAudio_createUriAudioPlayer(JNIEnv* e
     const SLboolean req[3] = {SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE, SL_BOOLEAN_TRUE};
     result = (*engineEngine)->CreateAudioPlayer(engineEngine, &uriPlayerObject, &audioSrc,
             &audioSnk, 3, ids, req);
+    ALOGD("通过 引擎对象的接口 创建 URL播放器对象(SLObjectItf)  需要支持接口 1.SEEK 2.MUTE 3.VOLUME ");
+    if( result != SL_RESULT_SUCCESS ){
+        ALOGE("CreateAudioPlayer fail result = %d " , result);
+        return JNI_FALSE ;
+    }
     // note that an invalid URI is not detected here, but during prepare/prefetch on Android,
     // or possibly during Realize on other platforms
     assert(SL_RESULT_SUCCESS == result);
@@ -409,18 +597,26 @@ jboolean Java_com_example_nativeaudio_NativeAudio_createUriAudioPlayer(JNIEnv* e
     (*env)->ReleaseStringUTFChars(env, uri, utf8);
 
     // realize the player
+    ALOGD("实例化  URL播放器对象(SLObjectItf) ");
     result = (*uriPlayerObject)->Realize(uriPlayerObject, SL_BOOLEAN_FALSE);
     // this will always succeed on Android, but we check result for portability to other platforms
     if (SL_RESULT_SUCCESS != result) {
+        ALOGE("AudioPlayer Realize fail result = %d " , result);
         (*uriPlayerObject)->Destroy(uriPlayerObject);
         uriPlayerObject = NULL;
         return JNI_FALSE;
     }
 
+    ALOGD("获得 URL播放器对象(SLObjectItf) 四个方法: play（SLPlayItf） seek（SLSeekItf） mute(SLMuteSoloItf) volume(SLVolumeItf)");
     // get the play interface
     result = (*uriPlayerObject)->GetInterface(uriPlayerObject, SL_IID_PLAY, &uriPlayerPlay);
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
+    if (SL_RESULT_SUCCESS != result) {
+        ALOGE("GetInterface SL_IID_PLAY fail result = %d " , result);
+        return JNI_FALSE;
+    }
+
 
     // get the seek interface
     result = (*uriPlayerObject)->GetInterface(uriPlayerObject, SL_IID_SEEK, &uriPlayerSeek);
@@ -437,6 +633,8 @@ jboolean Java_com_example_nativeaudio_NativeAudio_createUriAudioPlayer(JNIEnv* e
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
 
+
+
     return JNI_TRUE;
 }
 
@@ -451,11 +649,15 @@ void Java_com_example_nativeaudio_NativeAudio_setPlayingUriAudioPlayer(JNIEnv* e
     // make sure the URI audio player was created
     if (NULL != uriPlayerPlay) {
 
+        ALOGD("调用 URL播放器对象(SLObjectItf) 的方法 SLPlayItf ");
         // set the player's state
         result = (*uriPlayerPlay)->SetPlayState(uriPlayerPlay, isPlaying ?
-            SL_PLAYSTATE_PLAYING : SL_PLAYSTATE_PAUSED);
-        assert(SL_RESULT_SUCCESS == result);
+            SL_PLAYSTATE_PLAYING : SL_PLAYSTATE_PAUSED); // 暂停 和 播放
+        assert(SL_RESULT_SUCCESS == result); // SL_RESULT_SUCCESS 是 0
         (void)result;
+        ALOGD("SetPlayState %s done with %d ",
+              (isPlaying ? "SL_PLAYSTATE_PLAYING" : "SL_PLAYSTATE_PAUSED"),
+              result );
     }
 
 }
@@ -469,7 +671,6 @@ void Java_com_example_nativeaudio_NativeAudio_setLoopingUriAudioPlayer(JNIEnv* e
 
     // make sure the URI audio player was created
     if (NULL != uriPlayerSeek) {
-
         // set the looping state
         result = (*uriPlayerSeek)->SetLoop(uriPlayerSeek, (SLboolean) isLooping, 0,
                 SL_TIME_UNKNOWN);
@@ -498,6 +699,7 @@ void Java_com_example_nativeaudio_NativeAudio_setChannelMuteUriAudioPlayer(JNIEn
     SLresult result;
     SLMuteSoloItf muteSoloItf = getMuteSolo();
     if (NULL != muteSoloItf) {
+        ALOGD("Mute SetChannelSolo设置单独播放某个声道 SetChannelMuted单独静音某个声道 接口都是muteSoloItf ");
         result = (*muteSoloItf)->SetChannelMute(muteSoloItf, chan, mute);
         assert(SL_RESULT_SUCCESS == result);
         (void)result;
@@ -510,6 +712,7 @@ void Java_com_example_nativeaudio_NativeAudio_setChannelSoloUriAudioPlayer(JNIEn
     SLresult result;
     SLMuteSoloItf muteSoloItf = getMuteSolo();
     if (NULL != muteSoloItf) {
+        ALOGD("Solo SetChannelSolo设置单独播放某个声道 SetChannelMuted单独静音某个声道 接口都是muteSoloItf ");
         result = (*muteSoloItf)->SetChannelSolo(muteSoloItf, chan, solo);
         assert(SL_RESULT_SUCCESS == result);
         (void)result;
@@ -553,11 +756,30 @@ void Java_com_example_nativeaudio_NativeAudio_setVolumeUriAudioPlayer(JNIEnv* en
     SLresult result;
     SLVolumeItf volumeItf = getVolume();
     if (NULL != volumeItf) {
-        result = (*volumeItf)->SetVolumeLevel(volumeItf, millibel);
+        result = (*volumeItf)->SetVolumeLevel(volumeItf, millibel);// 设置音量  没有区分左右声道
         assert(SL_RESULT_SUCCESS == result);
         (void)result;
     }
 }
+
+void Java_com_example_nativeaudio_NativeAudio_setPlaybackRateUriAudioPlayer(JNIEnv* env, jclass clazz,
+                                                                      jint permille)
+{
+    SLresult result;
+
+    if (NULL != fdlaybackRateItf) {
+        result = (*fdlaybackRateItf)->SetRate(fdlaybackRateItf, permille);
+        if(SL_RESULT_SUCCESS == result){
+            ALOGD("set playback rate to %d done " , permille );
+        }else{
+            ALOGE("set playback rate to %d ERROR " , permille );
+        }
+        (void)result;
+    }
+}
+
+
+
 
 void Java_com_example_nativeaudio_NativeAudio_setMuteUriAudioPlayer(JNIEnv* env, jclass clazz,
         jboolean mute)
@@ -571,6 +793,7 @@ void Java_com_example_nativeaudio_NativeAudio_setMuteUriAudioPlayer(JNIEnv* env,
     }
 }
 
+// 左右声道  相对大小
 void Java_com_example_nativeaudio_NativeAudio_enableStereoPositionUriAudioPlayer(JNIEnv* env,
         jclass clazz, jboolean enable)
 {
@@ -760,6 +983,14 @@ jboolean Java_com_example_nativeaudio_NativeAudio_createAssetAudioPlayer(JNIEnv*
     result = (*fdPlayerObject)->GetInterface(fdPlayerObject, SL_IID_VOLUME, &fdPlayerVolume);
     assert(SL_RESULT_SUCCESS == result);
     (void)result;
+
+
+    result = (*fdPlayerObject)->GetInterface(fdPlayerObject, SL_IID_PLAYBACKRATE, &fdlaybackRateItf);
+    // assert(SL_RESULT_SUCCESS == result); // 不支持 SL_IID_PLAYBACKRATE 这里会产生断言
+    if( result != SL_RESULT_SUCCESS ){
+        ALOGE("PLAYBACKRATE result = %d " , result);
+        fdPlayerObject = NULL ;
+    }
 
     // enable whole file looping
     result = (*fdPlayerSeek)->SetLoop(fdPlayerSeek, SL_BOOLEAN_TRUE, 0, SL_TIME_UNKNOWN);
