@@ -86,13 +86,18 @@ public class NativeAudio extends Activity
             String nativeParam = myAudioMgr.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE);
             sampleRate = Integer.parseInt(nativeParam);
             nativeParam = myAudioMgr.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER);
-            bufSize = Integer.parseInt(nativeParam);
+            bufSize = Integer.parseInt(nativeParam); // 返回的采样率和buffer大小是字符串
 
-            // OUTPUT_SAMPLE_RATE = 48000 OUTPUT_FRAMES_PER_BUFFER = 192
-            Log.d(TAG,"OUTPUT_SAMPLE_RATE = " + sampleRate + " OUTPUT_FRAMES_PER_BUFFER = " + bufSize );
+            PackageManager pm = getPackageManager();
+            boolean claimsFeature = pm.hasSystemFeature(PackageManager.FEATURE_AUDIO_LOW_LATENCY);
+
+            // 高通小米5 OUTPUT_SAMPLE_RATE = 48000 OUTPUT_FRAMES_PER_BUFFER = 192 FEATURE_AUDIO_LOW_LATENCY = false
+            // MTK MT6735  OUTPUT_SAMPLE_RATE = 44100 OUTPUT_FRAMES_PER_BUFFER = 1024 FEATURE_AUDIO_LOW_LATENCY = false
+            Log.d(TAG,"OUTPUT_SAMPLE_RATE = " + sampleRate + " OUTPUT_FRAMES_PER_BUFFER = " + bufSize
+                + " FEATURE_AUDIO_LOW_LATENCY = " + claimsFeature );
         }
 
-
+        // 一开始就默认创建了 buffer queue AudioPlayer Demo
         createBufferQueueAudioPlayer(sampleRate, bufSize);
 
         // initialize URI spinner
@@ -127,7 +132,7 @@ public class NativeAudio extends Activity
         ((Button) findViewById(R.id.hello)).setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
                 // ignore the return value
-                selectClip(CLIP_HELLO, 5);
+                selectClip(CLIP_HELLO, 2);
             }
         });
 
@@ -165,6 +170,9 @@ public class NativeAudio extends Activity
                     created = createAssetAudioPlayer(assetManager, "withus.mp3");
                 }
                 if (created) {
+                    // 跟URI AudioPlayer Demo 不一样
+                    // URI AudioPlayer Demo 创建后 要按play pause播放
+                    // Assert/fd AudioPlayer  Demo 创建后立刻播放
                     isPlayingAsset = !isPlayingAsset;
                     setPlayingAssetAudioPlayer(isPlayingAsset);
                 }
@@ -176,6 +184,8 @@ public class NativeAudio extends Activity
             public void onClick(View view) {
                 if (!created && URI != null) {
                     Log.d(TAG , " uri_soundtrack create URI Audio Player URI " + URI );
+                    //URI = "file:///mnt/sdcard/xxx.3gp" ;
+                    //URI = "file:///mnt/sdcard/Banana.ogg" ;
                     created = createUriAudioPlayer(URI);
                 }
              }
@@ -243,7 +253,11 @@ public class NativeAudio extends Activity
              }
         });
 
-        // 左右声道  相对大小
+        /*
+        *  单声道的数据源 做 立体平移 Stereo Panning
+        *  https://developer.android.com/ndk/guides/audio/opensl-prog-notes.html#panning
+        *
+        * */
         ((Button) findViewById(R.id.enable_stereo_position_uri)).setOnClickListener(
                 new OnClickListener() {
             boolean enabled = false;
@@ -253,6 +267,7 @@ public class NativeAudio extends Activity
              }
         });
 
+        // 获取通道数目  如果只是创建了AudioPlayer 还不能获取通道数 需要SetPlayState之后才能获取
         ((Button) findViewById(R.id.channels_uri)).setOnClickListener(new OnClickListener() {
             public void onClick(View view) {
                 if (numChannelsUri == 0) {
@@ -365,6 +380,7 @@ public class NativeAudio extends Activity
     @Override
     protected void onPause()
     {
+        Log.d(TAG, "onPause");
         // turn off all audio
         selectClip(CLIP_NONE, 0);
         isPlayingAsset = false;
@@ -378,6 +394,7 @@ public class NativeAudio extends Activity
     @Override
     protected void onDestroy()
     {
+        Log.d(TAG, "onDestroy");
         shutdown();
         super.onDestroy();
     }
