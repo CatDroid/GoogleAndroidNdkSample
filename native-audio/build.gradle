@@ -1,14 +1,68 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
+/*
+    jcenter() 返回 MavenArtifactRepository 实例 指向一个URL名字是 Bintray.com(软件发布服务网站 使用库的标示字符串)
+    Maven库 是 jar库文件  的库
+    也可以是 jcenter.bintray.com 是一个以列表显示所有发布库的网站
+    远程依赖库 bintray.com或者jcenter.bintray.com
+    e.g: jcenter.bintray.com/com/android/support/support-compat/24.2.0/support-compat-24.2.0.aar
+
+    包名:库名称:版本号
+
+    下载到本地(xxx/m2repository/包名/库名称/版本号):
+    android-sdk/extras/android/m2repository/com/android/support/support-v4/[21.0.0|24.1.0|25.0.0]
+    或者
+    android-studio/gradle/m2repository/com/android/tools/build/gradle-experimental/[0.7.3|0.8.0|0.8.1|0.8.2]
+ */
 buildscript {
     repositories {
         jcenter()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle-experimental:0.8.0'
+        classpath 'com.android.tools.build:gradle-experimental:0.8.2'
+        //   classpath 'com.android.tools.build:gradle:2.2.2'
     }
 }
 allprojects {
     repositories {
         jcenter()
+        // mavenCentral()
+        // maven{ url 'http://maven.oschina.net/content/groups/public/'}
     }
 }
+/*
+ 切换到 换到国内的Maven镜像仓库，如开源中国的Maven库，又或者是换成自建的Maven私服
+ 把 jcenter() [bintray.com] 或者  mavenCentral() [maven.bintray.com] 换成:
+    maven{ url 'http://maven.oschina.net/content/groups/public/'} // oschina的maven服务器关了
+    maven{ url 'http://maven.aliyun.com/nexus/content/groups/public/'}
+
+    http://maven.net.cn/content/groups/public/
+    http://repository.jboss.org/nexus/content/groups/public
+
+    Apache Maven是Apache开发的一个工具，提供了用于贡献library的文件服务器
+
+    总的来说, 只有两个标准的Android library文件服务器 jcenter 和 Maven Central
+
+    jcenter是一个由 bintray.com维护的Maven仓库       jcenter()       http://jcenter.bintray.com/
+    Maven Central 则是由sonatype.org维护的Maven仓库  mavenCentral()  https://oss.sonatype.org/content/repositories/releases/
+
+    不管是jcenter还是Maven Central,两者都是Maven仓库,但维护在完全不同的服务器上,由不同的人提供内容,两者之间毫无关系
+    jcenter通过CDN发送library
+    jcenter是全世界最大的Java仓库
+
+
+    .aar文件是专门为安卓设计的
+    .jar文件以classes.jar的名字被嵌入到aar文件中
+    - /AndroidManifest.xml (mandatory)
+    - /classes.jar      (mandatory)
+    - /res/             (mandatory)
+    - /R.txt            (mandatory)
+    - /assets/          (optional)
+    - /libs/*.jar       (optional)
+    - /jni/<abi>/*.so   (optional)
+    - /proguard.txt     (optional)
+    - /lint.jar         (optional)
+
+*/
+
+
+
