@@ -1,9 +1,45 @@
 apply plugin: 'com.android.model.application'
+//apply plugin: 'com.android.application'
+
+/*
+
+plugin: 'com.android.model.application' => 插件 com.android.tools.build:gradle-experimental:0.8.2
+model {
+    android {
+
+    }
+}
+
+plugin: 'com.android.application' => 插件 com.android.tools.build:gradle:2.2.2
+android {
+    A.没有 ndk { }
+    defaultConfig{
+        minSdkVersion  9        B.不使用赋值方法: minSdkVersion.apiLevel = 9
+        targetSdkVersion  21
+    }
+}
+
+从experimental Gradle迁移到稳定的Gradle DSL
+tools.android.com/tech-docs/new-build-system/gradle-experimental/migrate-to-stable
+
+由于稳定版本 不使用组件模型机制(component model mechanism)
+所以需要修改 模块级别的build.gradle文件中一些DSL
+a.使用稳定版本的插件 : apply plugin: 'com.android.application'
+b.去掉model{}
+c.从minSdkVersion/targetSdkVersion 去掉.apiLevel
+d.修改 proguardFiles DSL成如下:
+    proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+e.从productFlavor配置中移除 create(...) 而使用如下DSL来创建 产品风格 flavor1
+    productFlavors {  flavor1 { applicationId “com.app” }  }
+
+
+f.在ndk{}中只定义abiFilters 移除其他,稳定的Gradle使用externalNativeBuild{} DSL来表述编译选项和连接Gradle到CMake/ndk-build工程
+ */
 
 model {
     android {
         compileSdkVersion = 21
-        buildToolsVersion = '24.0.3'
+        buildToolsVersion = '25.0.0'
 
         defaultConfig {
             applicationId    = 'com.example.nativeaudio'
@@ -12,14 +48,16 @@ model {
         }
         ndk {
             platformVersion = 21
-            moduleName = 'native-audio-jni'
+            moduleName = 'native-audio-jni' // 不需要Android.mk CMake 直接把所有C文件打包成一个so库
             toolchain = 'clang'
-            CFlags.add('-std=c99')
-            ldLibs.addAll(['android','OpenSLES', 'log'])
-            abiFilters.addAll(['armeabi', 'armeabi-v7a', 'arm64-v8a',
-                            ])
-// 'x86', 'x86_64',
-// 'mips', 'mips64'
+            stl       = 'gnustl_static'
+            CFlags.add('-std=c99')  // 必须大写CFlags 区分 CFlags和cppFlags
+            cppFlags.addAll(['-std=c++11', '-Wall',  '-fno-exceptions', '-fno-rtti'])
+            ldLibs.addAll(['android','OpenSLES', 'log', 'EGL', 'GLESv2','atomic'])
+
+            abiFilters.addAll(['armeabi', 'armeabi-v7a', 'arm64-v8a',])
+            // 'x86', 'x86_64',
+            // 'mips', 'mips64'
         }
         buildTypes {
             release {
@@ -30,6 +68,30 @@ model {
     }
 }
 
+// Android Studio IDE的配置 ~/.AndroidStudio2.2/
+
+// 从EclipseADT导入AS
+// (构建系统已知库文件)jar文件 转换为 在build.gradle'引用' 依赖关系(如下android.support-v4)  而不是拷贝jar文件
+// 但是jar文件 也会转换成 '保留'依赖关系 将会拷贝jar文件到libs目录 并在build.gradle中写明 compile('libs/xxx.jar')
+
+// android支持库  常用:support-v4 还有其他:support-v13 support-compat appcompat-v7
+// 位置在 android-sdk/extras/android/m2repository/com/android/support/support-v4/[21.0.0 | 24.1.0 | 25.0.0 ]
+// 从 Maven Center中下载  包含很多知名的第三方库 与project build.gradle中的jcenter有关系
+// 远程依赖库 bintray.com或者jcenter.bintray.com e.g: jcenter.bintray.com/com/android/support/support-compat/24.2.0/support-compat-24.2.0.aar
+// 包名:库名称:版本号
 dependencies {
-    compile 'com.android.support:support-v4:21.0.0'
+    compile 'com.android.support:support-v4:21.0.0' // 只是依赖引用
+    compile fileTree(include:['*.jar'] , dir:'libs') // 所有在libs目录下的jar文件都是本模块(e.g app)的依赖
+    // compile project(':jdom-2.0.5') // 如果这个项目中还有新建了jdom模块(其中可以包含第三方Jar) 那么本模块可以依赖项目中的这个模块
+
+
+    // build.gradle分为 project 和 module
+
+    // 新建模块 : File->New->New Module..->Import JAR/AAR Package
+    //              a.这样会拷贝jar文件到当前项目的新模块中(新模块有自己的模块build.gradle)
+    //              b.settings.gradle 添加新模块了 include ':app', ':android_framework'
+
+    // 添加模块依赖(jar)
+    // File->Project Structure->'app'模块->dependencies
+    //      ->添加 'app'模块的 依赖jar文件或者其他模块
 }
