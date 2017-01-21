@@ -65,6 +65,8 @@ struct engine {
 static int engine_init_display(struct engine* engine) {
     // initialize OpenGL ES and EGL
 
+    //ANativeWindow_setBuffersGeometry(engine->app->window , 1, 1, WINDOW_FORMAT_RGBA_8888 );
+
     /*
      * Here specify the attributes of the desired configuration.
      * Below, we select an EGLConfig with at least 8 bits per color
@@ -113,11 +115,25 @@ static int engine_init_display(struct engine* engine) {
         config = supportedConfigs[0];
     }
 
+
     /* EGL_NATIVE_VISUAL_ID is an attribute of the EGLConfig that is
      * guaranteed to be accepted by ANativeWindow_setBuffersGeometry().
      * As soon as we picked a EGLConfig, we can safely reconfigure the
      * ANativeWindow buffers to match, using EGL_NATIVE_VISUAL_ID. */
     eglGetConfigAttrib(display, config, EGL_NATIVE_VISUAL_ID, &format);
+
+    LOGI("surface format %d  " , format ); // = 2
+    ANativeWindow_setBuffersGeometry(engine->app->window , 0, 0, format );
+    /*
+     * 这里设置 0 0 将会使用原来的 image buffer(非显示window)的宽高
+     * 如果设置为  1 1 将会改变 eglQuerySurface  EGL_WIDTH EGL_HEIGHT 的值
+        enum {
+            WINDOW_FORMAT_RGBA_8888          = 1,
+            WINDOW_FORMAT_RGBX_8888          = 2,
+            WINDOW_FORMAT_RGB_565            = 4,
+        };
+     */
+
     surface = eglCreateWindowSurface(display, config, engine->app->window, NULL);
     context = eglCreateContext(display, config, NULL, NULL);
 
@@ -135,6 +151,7 @@ static int engine_init_display(struct engine* engine) {
     engine->width = w;
     engine->height = h;
     engine->state.angle = 0;
+    LOGI("surface [%d , %d ]" , w , h );
 
     // Check openGL on the system
     auto opengl_info = {GL_VENDOR, GL_RENDERER, GL_VERSION, GL_EXTENSIONS};
@@ -255,7 +272,7 @@ static void engine_handle_cmd(struct android_app* app, int32_t cmd) {
  * android_native_app_glue.  It runs in its own thread, with its own
  * event loop for receiving input events and doing other things.
  */
-void android_main(struct android_app* state) {
+void android_main(struct android_app* state) { // 在独立线程中运行 这个也是GL-T
     struct engine engine;
 
     // Make sure glue isn't stripped.
