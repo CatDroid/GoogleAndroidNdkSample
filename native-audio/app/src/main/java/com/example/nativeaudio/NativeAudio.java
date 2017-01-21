@@ -25,11 +25,12 @@ import android.content.res.AssetManager;
 import android.media.AudioManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.support.annotation.NonNull;
+//import android.support.annotation.NonNull;
 //import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.view.View;
 import android.view.View.OnClickListener;
+import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -41,7 +42,6 @@ import android.widget.Toast;
 public class NativeAudio extends Activity
         // implements ActivityCompat.OnRequestPermissionsResultCallback {
 {
-
     static final String TAG = "NativeAudio";
     private static final int AUDIO_ECHO_REQUEST = 0;
 
@@ -66,9 +66,29 @@ public class NativeAudio extends Activity
         super.onCreate(icicle);
         setContentView(R.layout.main);
 
-        Log.d(TAG,"onCreate ----------- ");
+        Log.d(TAG, "onCreate ----------- ");
 
         assetManager = getAssets();
+
+
+        /*
+            Ctrl+O 重写方法
+            Ctrl+I 实现接口
+
+            Ctrl+N 查找方法/接口
+            Ctrl+Shift+N 查找文件
+            Ctrl+Shift+ALt+N 查找符号
+
+
+            Ctrl+Space 代码补全提示
+            Ctrl+Shift+Space 智能代码补全
+            Ctrl+Shift+Enter 该行自动补全(光标跳到最后 加上分号; )
+            Ctrl+P 函数签名
+
+            Alt+Enter 自动修复/意图动作/自动补全
+
+            Ctrl+J 代码模板 (创建 for foreach Toast system.out.println) 或者直接敲入logm logr loge等回车
+          */
 
         // initialize native audio system
         createEngine();
@@ -210,6 +230,7 @@ public class NativeAudio extends Activity
             public void onClick(View view) {
                 isLooping = !isLooping;
                 setLoopingUriAudioPlayer(isLooping);
+
              }
         });
 
