@@ -30,10 +30,14 @@ import android.opengl.GLUtils;
 import android.util.Log;
 import android.widget.Toast;
 
+import java.util.Arrays;
+
 public class TeapotApplication extends Application {
+
+    static final private String TAG = "TeapotApplication";
     public void onCreate(){
         super.onCreate();	
-        Log.w("native-activity", "onCreate");
+        Log.w(TAG, "Application onCreate");
 
         final PackageManager pm = getApplicationContext().getPackageManager();
         ApplicationInfo ai;
@@ -44,5 +48,17 @@ public class TeapotApplication extends Application {
         }
         final String applicationName = (String) (ai != null ? pm.getApplicationLabel(ai) : "(unknown)");
         Toast.makeText(this, applicationName, Toast.LENGTH_SHORT).show();
+
+        Log.w(TAG, "Application label is " + applicationName );
+        Log.w(TAG, "PackageName is " +  this.getPackageName() );
+
+        float[] mat4 = new float[16] ;
+        float[] vec4 = new float[]{1.0f, 2.0f, 3.0f ,4.0f} ;
+        android.opengl.Matrix.setIdentityM(mat4,0);
+        Log.w(TAG, "mat = " + Arrays.toString(mat4));
+        float[] ver4_result = new float[4] ;
+        android.opengl.Matrix.multiplyMV(ver4_result,0 , mat4 , 0 ,vec4 , 0  );
+        Log.w(TAG, "mat4_result = " + Arrays.toString(ver4_result));
+
     }
 }
