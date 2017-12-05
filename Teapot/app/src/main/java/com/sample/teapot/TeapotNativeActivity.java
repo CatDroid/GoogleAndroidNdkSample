@@ -19,7 +19,9 @@ package com.sample.teapot;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.app.NativeActivity;
+import android.opengl.Matrix;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -30,6 +32,9 @@ import android.widget.PopupWindow;
 import android.widget.TextView;
 
 public class TeapotNativeActivity extends NativeActivity {
+
+    private final String TAG = "TeapotNativeActivity" ;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -48,6 +53,20 @@ public class TeapotNativeActivity extends NativeActivity {
                 }
             });
         }
+
+        float[] rm = new float[16];
+        Matrix.setRotateM( rm, 0 , 60 , 1 , 0 , 0 );
+        Log.d(TAG,String.format("JAVA X Rotate 60 is" +
+                        "\n%f %f %f %f" +
+                        "\n%f %f %f %f" +
+                        "\n%f %f %f %f" +
+                        "\n%f %f %f %f\n" ,
+                rm[0] , rm[4] , rm[8] , rm[12],
+                rm[1] , rm[5] , rm[9] , rm[13],
+                rm[2] , rm[6] , rm[10] , rm[14],
+                rm[3] , rm[7] , rm[11] , rm[15])
+        );
+
 
     }
 

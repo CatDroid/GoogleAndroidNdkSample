@@ -27,6 +27,7 @@
 // Teapot model data
 //--------------------------------------------------------------------------------
 #include "teapot.inl"
+#include "ndk_helper/vecmath.h"
 
 //--------------------------------------------------------------------------------
 // Ctor
@@ -59,16 +60,46 @@ void TeapotRenderer::Init() {
   int32_t stride = sizeof(TEAPOT_VERTEX);
   int32_t index = 0;
   TEAPOT_VERTEX* p = new TEAPOT_VERTEX[num_vertices_];
+
+    float xMax = 0 ; float xMin = 0 ;
+    float yMax = 0 ; float yMin = 0 ;
+    float zMax = 0 ; float zMin = 0 ;
   for (int32_t i = 0; i < num_vertices_; ++i) {
-    p[i].pos[0] = teapotPositions[index];
-    p[i].pos[1] = teapotPositions[index + 1];
-    p[i].pos[2] = teapotPositions[index + 2];
+
+      p[i].pos[0] = teapotPositions[index];
+      if( teapotPositions[index] >  xMax   ){
+          xMax = teapotPositions[index];
+      }
+      if( teapotPositions[index] < xMin   ){
+          xMin = teapotPositions[index];
+      }
+
+      p[i].pos[1] = teapotPositions[index + 1];
+      if( teapotPositions[index + 1] > yMax ){
+          yMax = teapotPositions[index + 1];
+      }
+      if( teapotPositions[index + 1 ] < yMin   ){
+          yMin = teapotPositions[index + 1];
+      }
+
+      p[i].pos[2] = teapotPositions[index + 2];
+      if( teapotPositions[index + 2] > zMax){
+          zMax = teapotPositions[index + 2];
+      }
+      if( teapotPositions[index + 2 ] < zMin   ){
+          zMin = teapotPositions[index + 2];
+      }
 
     p[i].normal[0] = teapotNormals[index];
     p[i].normal[1] = teapotNormals[index + 1];
     p[i].normal[2] = teapotNormals[index + 2];
     index += 3;
   }
+
+    LOGI("xMax = %f yMax = %f zMax = %f\n" , xMax , yMax , zMax );
+    LOGI("xMin = %f yMin = %f zMin = %f\n" , xMin , yMin , zMin );
+    // xMax = 43.671501 yMax = 25.478399 zMax = 40.128399
+
   glGenBuffers(1, &vbo_);
   glBindBuffer(GL_ARRAY_BUFFER, vbo_);
   glBufferData(GL_ARRAY_BUFFER, stride * num_vertices_, p, GL_STATIC_DRAW);
@@ -79,8 +110,21 @@ void TeapotRenderer::Init() {
   UpdateViewport();
   mat_model_ = ndk_helper::Mat4::Translation(0, 0, -15.f);
 
-  ndk_helper::Mat4 mat = ndk_helper::Mat4::RotationX(M_PI / 3);
+  //ndk_helper::Mat4 mat = ndk_helper::Mat4::RotationX(M_PI / 3);
+//    ndk_helper::Mat4 mat = ndk_helper::Mat4::RotationX( 0 );
+    ndk_helper::Mat4 mat = ndk_helper::Mat4::RotationX( M_PI / 3 ); // 左手螺旋为正
+
+    LOGI("Native X Rotate 60 is"  "\n%f %f %f %f"
+                            "\n%f %f %f %f"
+                            "\n%f %f %f %f"
+                            "\n%f %f %f %f\n" ,
+         mat.Ptr()[0] , mat.Ptr()[4] , mat.Ptr()[8] , mat.Ptr()[12],
+         mat.Ptr()[1] , mat.Ptr()[5] , mat.Ptr()[9] , mat.Ptr()[13],
+         mat.Ptr()[2] , mat.Ptr()[6] , mat.Ptr()[10] , mat.Ptr()[14],
+         mat.Ptr()[3] , mat.Ptr()[7] , mat.Ptr()[11] , mat.Ptr()[15] );
+
   mat_model_ = mat * mat_model_;
+//    mat_model_ =    mat_model_ * mat ;
 }
 
 void TeapotRenderer::UpdateViewport() {
@@ -93,8 +137,12 @@ void TeapotRenderer::UpdateViewport() {
   if (viewport[2] < viewport[3]) {
     float aspect =
         static_cast<float>(viewport[2]) / static_cast<float>(viewport[3]);
-    mat_projection_ =
+//    mat_projection_ = // 不能直接把宽和高 直接传进入???
+//        ndk_helper::Mat4::Perspective(viewport[2]*1.0f, viewport[3]*1.0f, CAM_NEAR, CAM_FAR);
+      mat_projection_ =
         ndk_helper::Mat4::Perspective(aspect, 1.0f, CAM_NEAR, CAM_FAR);
+      LOGI("Perspective aspect %f viewport[%d %d %d %d]" ,
+           aspect , viewport[0] ,viewport[1] ,viewport[2] ,viewport[3]  );
   } else {
     float aspect =
         static_cast<float>(viewport[3]) / static_cast<float>(viewport[2]);
@@ -129,7 +177,7 @@ void TeapotRenderer::Update(float fTime) {
                                        ndk_helper::Vec3(0.f, 0.f, 0.f),
                                        ndk_helper::Vec3(0.f, 1.f, 0.f));
 
-  if (camera_) {
+  if (camera_) {   // 每次都调用
     camera_->Update();
     mat_view_ = camera_->GetTransformMatrix() * mat_view_ *
                 camera_->GetRotationMatrix() * mat_model_;
@@ -141,7 +189,7 @@ void TeapotRenderer::Update(float fTime) {
 void TeapotRenderer::Render() {
   //
   // Feed Projection and Model View matrices to the shaders
-  ndk_helper::Mat4 mat_vp = mat_projection_ * mat_view_;
+  ndk_helper::Mat4 mat_vp = mat_projection_ * mat_view_; // P * M * V
 
   // Bind the VBO
   glBindBuffer(GL_ARRAY_BUFFER, vbo_);
@@ -247,7 +295,10 @@ bool TeapotRenderer::LoadShaders(SHADER_PARAMS* params, const char* strVsh,
 
   // Get uniform locations
   params->matrix_projection_ = glGetUniformLocation(program, "uPMatrix");
+    // 改变顶点坐标的  会对顶点坐标进行 P * M * V  mat_projection_ * mat_view_ * mat_model_;
+
   params->matrix_view_ = glGetUniformLocation(program, "uMVMatrix");
+    // 改变颜色 光照
 
   params->light0_ = glGetUniformLocation(program, "vLight0");
   params->material_diffuse_ = glGetUniformLocation(program, "vMaterialDiffuse");
